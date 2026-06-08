@@ -1,0 +1,61 @@
+rules_version = '2';
+
+// ════════════════════════════════════════════════════════════════
+//  NAAS — Firestore Security Rules
+//  Deploy with: firebase deploy --only firestore:rules
+// ════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ───────────────────────────────────────
+    function isAuth()       { return request.auth != null; }
+    function isOwner(uid)   { return isAuth() && request.auth.uid == uid; }
+    function isAdmin()      { return isAuth() && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == "admin"; }
+    function validSeverity(){ return request.resource.data.severity in ["CRITICAL","HIGH","MODERATE","LOW"]; }
+    function validType()    { return request.resource.data.type in ["BANDIT","KIDNAP","FLOOD","FIRE","CULT","PROTEST","ACCIDENT","TERROR","DISEASE","ROBBERY"]; }
+
+    // ── Alerts (public read, admin write) ──────────────────────
+    match /alerts/{alertId} {
+      allow read:   if true;                             // Anyone can read alerts
+      allow create: if isAdmin() && validSeverity() && validType();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Users (own profile only) ───────────────────────────────
+    match /users/{userId} {
+      allow read:   if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // ── Reports (authenticated users can create, admins can read all) ──
+    match /reports/{reportId} {
+      allow create: if isAuth();
+      allow read:   if isAdmin() || (isAuth() && resource.data.submittedBy == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── FCM Subscriptions (push tokens) ───────────────────────
+    match /subscriptions/{subId} {
+      allow create: if isAuth();
+      allow read:   if isAdmin() || (isAuth() && resource.data.userId == request.auth.uid);
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Admin roles list ───────────────────────────────────────
+    match /admins/{userId} {
+      allow read:  if isOwner(userId);
+      allow write: if false;  // Only set manually in Firebase Console
+    }
+
+    // ── App config (public read) ───────────────────────────────
+    match /config/{docId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+  }
+}

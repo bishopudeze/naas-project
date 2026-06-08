@@ -1,0 +1,10 @@
+<svg width="384" height="384" viewBox="0 0 384 384" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#006400"/>
+    </radialGradient>
+  </defs>
+  <rect width="384" height="384" rx="84.48" fill="url(#bg)"/>
+  <text x="50%" y="55%" font-size="199" text-anchor="middle" dominant-baseline="middle">🛡️</text>
+</svg>
