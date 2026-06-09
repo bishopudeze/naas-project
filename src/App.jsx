@@ -183,10 +183,105 @@ Return EXACTLY this JSON:
 //  REAL-TIME POLLING (Supabase Realtime / Firebase onSnapshot sim)
 // ════════════════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════════════════
+//  LIVE NIGERIAN NEWS FETCHER
+// ════════════════════════════════════════════════════════════════
+
+const NEWS_FEEDS = [
+  "https://api.rss2json.com/v1/api.json?rss_url=https://www.vanguardngr.com/category/news/feed/",
+  "https://api.rss2json.com/v1/api.json?rss_url=https://punchng.com/topics/news/feed/",
+  "https://api.rss2json.com/v1/api.json?rss_url=https://dailypost.ng/category/news/feed/",
+];
+
+const SECURITY_KEYWORDS = ["bandit","kidnap","attack","robbery","flood","fire","explosion","bomb","shooting","kill","abduct","terror","riot","unrest","accident","disease","outbreak","cholera","lassa","security"];
+const NIGERIAN_STATES_LOWER = ["abia","adamawa","akwa ibom","anambra","bauchi","bayelsa","benue","borno","cross river","delta","ebonyi","edo","ekiti","enugu","abuja","fct","gombe","imo","jigawa","kaduna","kano","katsina","kebbi","kogi","kwara","lagos","nasarawa","niger","ogun","ondo","osun","oyo","plateau","rivers","sokoto","taraba","yobe","zamfara"];
+
+function detectState(text) {
+  const lower = text.toLowerCase();
+  const match = NIGERIAN_STATES_LOWER.find(s => lower.includes(s));
+  if (!match) return null;
+  if (match === "abuja" || match === "fct") return "FCT – Abuja";
+  return match.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+function classifyNews(title, desc) {
+  const text = (title + " " + desc).toLowerCase();
+  if (text.includes("bandit") || text.includes("gunm")) return "BANDIT";
+  if (text.includes("kidnap") || text.includes("abduct")) return "KIDNAP";
+  if (text.includes("flood") || text.includes("overflow")) return "FLOOD";
+  if (text.includes("fire") || text.includes("inferno")) return "FIRE";
+  if (text.includes("bomb") || text.includes("explos") || text.includes("terror")) return "TERROR";
+  if (text.includes("robbery") || text.includes("armed rob")) return "ROBBERY";
+  if (text.includes("cult") || text.includes("gang")) return "CULT";
+  if (text.includes("protest") || text.includes("riot")) return "PROTEST";
+  if (text.includes("disease") || text.includes("outbreak") || text.includes("cholera")) return "DISEASE";
+  if (text.includes("accident") || text.includes("crash")) return "ACCIDENT";
+  return null;
+}
+
+function getSeverity(title) {
+  const t = title.toLowerCase();
+  if (t.includes("kill") || t.includes("dead") || t.includes("bomb") || t.includes("terror")) return "CRITICAL";
+  if (t.includes("attack") || t.includes("kidnap") || t.includes("rob")) return "HIGH";
+  return "MODERATE";
+}
+
+async function fetchLiveNigerianNews() {
+  const fetched = [];
+  for (const url of NEWS_FEEDS) {
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.items) continue;
+      for (const item of data.items.slice(0, 15)) {
+        const title = item.title || "";
+        const desc  = (item.description || "").replace(/<[^>]*>/g,"");
+        const text  = (title + " " + desc).toLowerCase();
+        if (!SECURITY_KEYWORDS.some(k => text.includes(k))) continue;
+        const state = detectState(title + " " + desc);
+        if (!state) continue;
+        const type = classifyNews(title, desc);
+        if (!type) continue;
+        fetched.push({
+          id: "news_" + encodeURIComponent(item.guid || item.link || "").slice(-20) + "_" + new Date(item.pubDate).getTime(),
+          type, state, lga: state,
+          severity: getSeverity(title),
+          timestamp: new Date(item.pubDate).getTime() || Date.now(),
+          msg: title.slice(0, 160),
+          verified: true,
+          source: data.feed?.title || "Nigerian News",
+          reportCount: 0,
+          isLiveNews: true,
+          link: item.link,
+        });
+      }
+    } catch { /* skip failed feeds */ }
+  }
+  return fetched;
+}
+
 function useRealTime(userState, userLga, onNew) {
   const [alerts,   setAlerts]   = useState(DB.getAlerts());
   const [lastPoll, setLastPoll] = useState(Date.now());
+  const [newsLoaded, setNewsLoaded] = useState(false);
   const seen = useRef(new Set(INITIAL_ALERTS.map(a=>a.id)));
+
+  useEffect(() => {
+    const loadNews = async () => {
+      const newsAlerts = await fetchLiveNigerianNews();
+      newsAlerts.forEach(a => {
+        if (!seen.current.has(a.id) && !DB._store.alerts.find(x => x.id === a.id)) {
+          seen.current.add(a.id);
+          DB._store.alerts.unshift(a);
+        }
+      });
+      setAlerts(DB.getAlerts());
+      setNewsLoaded(true);
+    };
+    loadNews();
+    const newsIv = setInterval(loadNews, 10 * 60 * 1000);
+    return () => clearInterval(newsIv);
+  }, []);
 
   useEffect(() => {
     const iv = setInterval(() => {
@@ -204,7 +299,7 @@ function useRealTime(userState, userLga, onNew) {
     return () => clearInterval(iv);
   }, [userState, userLga, onNew]);
 
-  return { alerts, lastPoll };
+  return { alerts, lastPoll, newsLoaded };
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -290,6 +385,7 @@ function AlertCard({ alert, compact }) {
           <span>📍 {alert.lga}, {alert.state}</span>
           <span>🕐 {ago(alert.timestamp)}</span>
           {alert.verified && <span style={{ color:"#006400",fontWeight:700 }}>✓ Verified</span>}
+          {alert.isLiveNews && <span style={{ color:"#3182ce",fontWeight:700 }}>📡 Live News</span>}
           <span>👥 {alert.reportCount}</span>
         </div>
       </div>
