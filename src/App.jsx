@@ -393,7 +393,8 @@ function Signup({ onComplete }) {
     <div style={{marginBottom:13}}>
       <label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#4a5568",marginBottom:5}}>{label}</label>
       <input type={type} value={form[k]} onChange={e=>set(k,e.target.value)} placeholder={ph}
-        style={{width:"100%",boxSizing:"border-box",padding:"11px 13px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:14,outline:"none",fontFamily:"inherit",background:"#f7fafc"}}/>
+        autoComplete={type==="tel"?"tel":type==="email"?"email":"name"}
+        style={{width:"100%",boxSizing:"border-box",padding:"13px 14px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:16,outline:"none",fontFamily:"inherit",background:"#fff",WebkitAppearance:"none"}}/>
     </div>
   );
 
@@ -428,14 +429,14 @@ function Signup({ onComplete }) {
           </div>
           <div style={{marginBottom:12}}>
             <label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#4a5568",marginBottom:5}}>State</label>
-            <select value={form.state} onChange={e=>set("state",e.target.value)} style={{width:"100%",padding:"11px 13px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:14,background:"#f7fafc",fontFamily:"inherit"}}>
+            <select value={form.state} onChange={e=>set("state",e.target.value)} style={{width:"100%",padding:"13px 14px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:16,background:"#fff",fontFamily:"inherit",WebkitAppearance:"none",appearance:"none"}}>
               <option value="">-- Select State --</option>
               {NIGERIA_STATES.map(s=><option key={s}>{s}</option>)}
             </select>
           </div>
           <div style={{marginBottom:14}}>
             <label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#4a5568",marginBottom:5}}>LGA</label>
-            <select value={form.lga} onChange={e=>set("lga",e.target.value)} disabled={!form.state} style={{width:"100%",padding:"11px 13px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:14,background:form.state?"#f7fafc":"#edf2f7",fontFamily:"inherit"}}>
+            <select value={form.lga} onChange={e=>set("lga",e.target.value)} disabled={!form.state} style={{width:"100%",padding:"13px 14px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:16,background:form.state?"#fff":"#edf2f7",fontFamily:"inherit",WebkitAppearance:"none",appearance:"none"}}>
               <option value="">-- Select LGA --</option>
               {lgas.map(l=><option key={l}>{l}</option>)}
               {!lgas.length&&form.state&&<option value={form.state+" General"}>{form.state} (General)</option>}
@@ -875,21 +876,75 @@ function Admin({ onBack }) {
 }
 
 function LocationUpdater({ user, onUpdate, onBack }) {
-  const [state,setState]=useState(user.state);
-  const [lga,setLga]=useState(user.lga);
+  const [state,setState]=useState(user.state||"");
+  const [lga,setLga]=useState(user.lga||"");
+  const [detecting,setDetecting]=useState(false);
+  const [gpsError,setGpsError]=useState("");
+  const [gpsSuccess,setGpsSuccess]=useState("");
   const lgas=LGA_MAP[state]||[];
+
+  const autoDetect=()=>{
+    setDetecting(true); setGpsError(""); setGpsSuccess("");
+    if(!navigator.geolocation){ setGpsError("GPS not supported on this device."); setDetecting(false); return; }
+    navigator.geolocation.getCurrentPosition(
+      async(pos)=>{
+        try{
+          const {latitude,longitude}=pos.coords;
+          const res=await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+          const data=await res.json();
+          const addr=data.address||{};
+          const raw=addr.state?.replace(" State","")||"";
+          const matched=NIGERIA_STATES.find(s=>s.toLowerCase().includes(raw.toLowerCase())||raw.toLowerCase().includes(s.toLowerCase()));
+          if(matched){
+            const detectedLga=addr.county||addr.city_district||addr.suburb||matched;
+            setState(matched); setLga(detectedLga);
+            setGpsSuccess(`📍 Detected: ${detectedLga}, ${matched}`);
+          } else { setGpsError("Could not match your location to a Nigerian state. Please select manually."); }
+        } catch { setGpsError("Location read failed. Please select manually."); }
+        setDetecting(false);
+      },
+      ()=>{ setGpsError("Location access denied. Please enable GPS and try again, or select manually."); setDetecting(false); }
+    );
+  };
+
   return (
     <div style={{minHeight:"100vh",background:"#f0fdf4",padding:20}}>
       <button onClick={onBack} style={{background:"none",border:"none",color:"#006400",fontSize:14,cursor:"pointer",marginBottom:18,fontWeight:700}}>← Back</button>
-      <div style={{fontFamily:"'Georgia',serif",fontSize:20,fontWeight:700,marginBottom:5}}>Update Location</div>
-      <div style={{fontSize:13,color:"#4a5568",marginBottom:18}}>Travelling? Update to receive local alerts for where you are now.</div>
+      <div style={{fontFamily:"'Georgia',serif",fontSize:20,fontWeight:700,marginBottom:4}}>Update Location</div>
+      <div style={{fontSize:13,color:"#4a5568",marginBottom:18,lineHeight:1.6}}>
+        Travelling? Update your location to receive alerts for where you are now. You can also monitor your hometown remotely.
+      </div>
+
+      {/* Current location badge */}
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:10,fontSize:13}}>
+        <span style={{fontSize:20}}>📍</span>
+        <div>
+          <div style={{fontWeight:700,color:"#1a202c"}}>Current: {user.lga}, {user.state}</div>
+          <div style={{fontSize:11,color:"#718096"}}>Tap below to update</div>
+        </div>
+      </div>
+
+      {/* GPS Auto-Detect button */}
+      <button onClick={autoDetect} disabled={detecting} style={{width:"100%",padding:"13px",background:detecting?"#a0aec0":"#2b6cb0",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:detecting?"not-allowed":"pointer",marginBottom:10,fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+        <span>{detecting?"⏳":"📡"}</span>
+        {detecting?"Detecting your location...":"Auto-Detect My Location (GPS)"}
+      </button>
+
+      {gpsError&&<div style={{fontSize:12,color:"#c53030",background:"#fff5f5",border:"1px solid #fed7d7",borderRadius:8,padding:"9px 12px",marginBottom:12}}>⚠️ {gpsError}</div>}
+      {gpsSuccess&&<div style={{fontSize:12,color:"#276749",background:"#f0fff4",border:"1px solid #68d391",borderRadius:8,padding:"9px 12px",marginBottom:12}}>✅ {gpsSuccess} — Confirm below to save.</div>}
+
+      <div style={{textAlign:"center",fontSize:12,color:"#718096",margin:"14px 0 14px"}}>— or select your location manually —</div>
+
+      {/* Manual State selector */}
       <div style={{marginBottom:13}}>
         <label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#4a5568",marginBottom:5}}>State</label>
-        <select value={state} onChange={e=>{setState(e.target.value);setLga("");}} style={{width:"100%",padding:"12px 13px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:14,fontFamily:"inherit"}}>
+        <select value={state} onChange={e=>{setState(e.target.value);setLga("");setGpsSuccess("");}} style={{width:"100%",padding:"12px 13px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:14,fontFamily:"inherit",background:"#f7fafc"}}>
           <option value="">-- Select State --</option>
           {NIGERIA_STATES.map(s=><option key={s}>{s}</option>)}
         </select>
       </div>
+
+      {/* Manual LGA selector */}
       <div style={{marginBottom:22}}>
         <label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#4a5568",marginBottom:5}}>LGA</label>
         <select value={lga} onChange={e=>setLga(e.target.value)} disabled={!state} style={{width:"100%",padding:"12px 13px",borderRadius:8,border:"1.5px solid #cbd5e0",fontSize:14,background:state?"#f7fafc":"#edf2f7",fontFamily:"inherit"}}>
@@ -897,9 +952,11 @@ function LocationUpdater({ user, onUpdate, onBack }) {
           {lgas.map(l=><option key={l}>{l}</option>)}
           {!lgas.length&&state&&<option value={state+" General"}>{state} (General)</option>}
         </select>
+        {!lgas.length&&state&&<div style={{fontSize:11,color:"#718096",marginTop:4}}>Full LGA list for {state} coming soon.</div>}
       </div>
+
       <button onClick={()=>onUpdate(state,lga||(state+" General"))} disabled={!state} style={{width:"100%",padding:"14px",background:state?"#006400":"#a0aec0",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:state?"pointer":"not-allowed",fontFamily:"'Georgia',serif"}}>
-        ✓ Update Location
+        ✓ Save My Location
       </button>
     </div>
   );
